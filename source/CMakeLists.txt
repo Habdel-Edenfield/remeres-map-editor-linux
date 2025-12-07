@@ -69,6 +69,9 @@ if (MSVC)
 	target_compile_options(${PROJECT_NAME} PUBLIC /MP /FS /Zf /EHsc )
 else()
 	add_executable(${PROJECT_NAME} "")
+	if(UNIX AND NOT APPLE)
+		add_definitions(-D__LINUX__)
+	endif()
 endif()
 
 # === OpenMP ===
