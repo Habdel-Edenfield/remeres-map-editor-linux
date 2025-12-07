@@ -2113,60 +2113,73 @@ void MainMenuBar::OnZoomNormal(wxCommandEvent &event) {
 }
 
 void MainMenuBar::OnChangeViewSettings(wxCommandEvent &event) {
-	g_settings.setInteger(Config::SHOW_ALL_FLOORS, IsItemChecked(MenuBar::SHOW_ALL_FLOORS));
-	if (IsItemChecked(MenuBar::SHOW_ALL_FLOORS)) {
-		EnableItem(MenuBar::SELECT_MODE_VISIBLE, true);
-		EnableItem(MenuBar::SELECT_MODE_LOWER, true);
-	} else {
-		EnableItem(MenuBar::SELECT_MODE_VISIBLE, false);
-		EnableItem(MenuBar::SELECT_MODE_LOWER, false);
-		CheckItem(MenuBar::SELECT_MODE_CURRENT, true);
-		g_settings.setInteger(Config::SELECTION_TYPE, SELECT_CURRENT_FLOOR);
-	}
-	// Logic to fix accelerator toggling on Linux (same as Autoborder fix)
-	auto manual_toggle = [&](MenuBar::ActionID id, Config::Key config) {
-		bool current_state = g_settings.getInteger(config) != 0;
-		bool ui_state = IsItemChecked(id);
-		if (current_state == ui_state) {
-			ui_state = !current_state;
-			CheckItem(id, ui_state);
+	// Get the menu item ID that triggered this event
+	int id = event.GetId() - static_cast<int>(MAIN_FRAME_MENU);
+	MenuBar::ActionID action = static_cast<MenuBar::ActionID>(id);
+
+	// Helper lambda to handle toggle with accelerator fix for Linux
+	// On Linux/GTK, accelerators don't auto-toggle wxITEM_CHECK state
+	auto handle_toggle = [&](MenuBar::ActionID menu_id, Config::Key config, bool invert = false) {
+		if (action == menu_id) {
+			bool current_state = g_settings.getInteger(config) != 0;
+			bool ui_state = IsItemChecked(menu_id);
+			// If accelerator was used, UI state wasn't flipped yet
+			if (current_state == ui_state) {
+				ui_state = !current_state;
+				CheckItem(menu_id, ui_state);
+			}
+			g_settings.setInteger(config, invert ? !ui_state : ui_state);
+			return true;
 		}
-		g_settings.setInteger(config, ui_state);
+		return false;
 	};
 
-	// We apply manual toggle logic for all items that might be triggered by an accelerator
-	// Note: Some dont have direct config aliases or logic is mixed, so we handle them carefully.
-
-	// Complex ones first
-	manual_toggle(MenuBar::GHOST_HIGHER_FLOORS, Config::TRANSPARENT_FLOORS);
-	manual_toggle(MenuBar::GHOST_ITEMS, Config::TRANSPARENT_ITEMS);
-	manual_toggle(MenuBar::SHOW_INGAME_BOX, Config::SHOW_INGAME_BOX);
-	manual_toggle(MenuBar::SHOW_LIGHTS, Config::SHOW_LIGHTS);
-	manual_toggle(MenuBar::SHOW_LIGHT_STRENGTH, Config::SHOW_LIGHT_STRENGTH);
-	manual_toggle(MenuBar::SHOW_GRID, Config::SHOW_GRID);
-
-	// Invert logic for SHOW_EXTRA (Menu says "Hide Extra", Config is SHOW_EXTRA) - complicated, skip for now or handle specifically if reported.
-	// Actually SHOW_EXTRA is likely "Hide Non-Editable"? Let's stick to the straight forward ones first to avoid regression.
-	g_settings.setInteger(Config::SHOW_EXTRA, !IsItemChecked(MenuBar::SHOW_EXTRA));
-
-	manual_toggle(MenuBar::SHOW_SHADE, Config::SHOW_SHADE);
-	manual_toggle(MenuBar::SHOW_SPECIAL, Config::SHOW_SPECIAL_TILES);
-	manual_toggle(MenuBar::SHOW_AS_MINIMAP, Config::SHOW_AS_MINIMAP);
-	manual_toggle(MenuBar::SHOW_ONLY_COLORS, Config::SHOW_ONLY_TILEFLAGS);
-	manual_toggle(MenuBar::SHOW_ONLY_MODIFIED, Config::SHOW_ONLY_MODIFIED_TILES);
-	manual_toggle(MenuBar::SHOW_MONSTERS, Config::SHOW_MONSTERS);
-	manual_toggle(MenuBar::SHOW_SPAWNS_MONSTER, Config::SHOW_SPAWNS_MONSTER);
-	manual_toggle(MenuBar::SHOW_NPCS, Config::SHOW_NPCS);
-	manual_toggle(MenuBar::SHOW_SPAWNS_NPC, Config::SHOW_SPAWNS_NPC);
-	manual_toggle(MenuBar::SHOW_HOUSES, Config::SHOW_HOUSES);
-	manual_toggle(MenuBar::HIGHLIGHT_ITEMS, Config::HIGHLIGHT_ITEMS);
-	manual_toggle(MenuBar::SHOW_PATHING, Config::SHOW_BLOCKING);
-	manual_toggle(MenuBar::SHOW_TOOLTIPS, Config::SHOW_TOOLTIPS);
-	manual_toggle(MenuBar::SHOW_PREVIEW, Config::SHOW_PREVIEW);
-	manual_toggle(MenuBar::SHOW_WALL_HOOKS, Config::SHOW_WALL_HOOKS);
-	manual_toggle(MenuBar::SHOW_PICKUPABLES, Config::SHOW_PICKUPABLES);
-	manual_toggle(MenuBar::SHOW_MOVEABLES, Config::SHOW_MOVEABLES);
-	manual_toggle(MenuBar::SHOW_AVOIDABLES, Config::SHOW_AVOIDABLES);
+	// Handle SHOW_ALL_FLOORS special case (has dependent menu items)
+	if (action == MenuBar::SHOW_ALL_FLOORS) {
+		bool current_state = g_settings.getInteger(Config::SHOW_ALL_FLOORS) != 0;
+		bool ui_state = IsItemChecked(MenuBar::SHOW_ALL_FLOORS);
+		if (current_state == ui_state) {
+			ui_state = !current_state;
+			CheckItem(MenuBar::SHOW_ALL_FLOORS, ui_state);
+		}
+		g_settings.setInteger(Config::SHOW_ALL_FLOORS, ui_state);
+		
+		if (ui_state) {
+			EnableItem(MenuBar::SELECT_MODE_VISIBLE, true);
+			EnableItem(MenuBar::SELECT_MODE_LOWER, true);
+		} else {
+			EnableItem(MenuBar::SELECT_MODE_VISIBLE, false);
+			EnableItem(MenuBar::SELECT_MODE_LOWER, false);
+			CheckItem(MenuBar::SELECT_MODE_CURRENT, true);
+			g_settings.setInteger(Config::SELECTION_TYPE, SELECT_CURRENT_FLOOR);
+		}
+	}
+	// Handle all other toggleable view settings
+	else if (handle_toggle(MenuBar::GHOST_HIGHER_FLOORS, Config::TRANSPARENT_FLOORS)) {}
+	else if (handle_toggle(MenuBar::GHOST_ITEMS, Config::TRANSPARENT_ITEMS)) {}
+	else if (handle_toggle(MenuBar::SHOW_INGAME_BOX, Config::SHOW_INGAME_BOX)) {}
+	else if (handle_toggle(MenuBar::SHOW_LIGHTS, Config::SHOW_LIGHTS)) {}
+	else if (handle_toggle(MenuBar::SHOW_LIGHT_STRENGTH, Config::SHOW_LIGHT_STRENGTH)) {}
+	else if (handle_toggle(MenuBar::SHOW_GRID, Config::SHOW_GRID)) {}
+	else if (handle_toggle(MenuBar::SHOW_EXTRA, Config::SHOW_EXTRA, true)) {} // Inverted
+	else if (handle_toggle(MenuBar::SHOW_SHADE, Config::SHOW_SHADE)) {}
+	else if (handle_toggle(MenuBar::SHOW_SPECIAL, Config::SHOW_SPECIAL_TILES)) {}
+	else if (handle_toggle(MenuBar::SHOW_AS_MINIMAP, Config::SHOW_AS_MINIMAP)) {}
+	else if (handle_toggle(MenuBar::SHOW_ONLY_COLORS, Config::SHOW_ONLY_TILEFLAGS)) {}
+	else if (handle_toggle(MenuBar::SHOW_ONLY_MODIFIED, Config::SHOW_ONLY_MODIFIED_TILES)) {}
+	else if (handle_toggle(MenuBar::SHOW_MONSTERS, Config::SHOW_MONSTERS)) {}
+	else if (handle_toggle(MenuBar::SHOW_SPAWNS_MONSTER, Config::SHOW_SPAWNS_MONSTER)) {}
+	else if (handle_toggle(MenuBar::SHOW_NPCS, Config::SHOW_NPCS)) {}
+	else if (handle_toggle(MenuBar::SHOW_SPAWNS_NPC, Config::SHOW_SPAWNS_NPC)) {}
+	else if (handle_toggle(MenuBar::SHOW_HOUSES, Config::SHOW_HOUSES)) {}
+	else if (handle_toggle(MenuBar::HIGHLIGHT_ITEMS, Config::HIGHLIGHT_ITEMS)) {}
+	else if (handle_toggle(MenuBar::SHOW_PATHING, Config::SHOW_BLOCKING)) {}
+	else if (handle_toggle(MenuBar::SHOW_TOOLTIPS, Config::SHOW_TOOLTIPS)) {}
+	else if (handle_toggle(MenuBar::SHOW_PREVIEW, Config::SHOW_PREVIEW)) {}
+	else if (handle_toggle(MenuBar::SHOW_WALL_HOOKS, Config::SHOW_WALL_HOOKS)) {}
+	else if (handle_toggle(MenuBar::SHOW_PICKUPABLES, Config::SHOW_PICKUPABLES)) {}
+	else if (handle_toggle(MenuBar::SHOW_MOVEABLES, Config::SHOW_MOVEABLES)) {}
+	else if (handle_toggle(MenuBar::SHOW_AVOIDABLES, Config::SHOW_AVOIDABLES)) {}
 
 	g_gui.RefreshView();
 	g_gui.root->GetAuiToolBar()->UpdateIndicators();

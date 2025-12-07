@@ -62,13 +62,13 @@ NpcPalettePanel::NpcPalettePanel(wxWindow* parent, wxWindowID id) :
 	grid->AddGrowableCol(1);
 
 	grid->Add(newd wxStaticText(this, wxID_ANY, "Spawntime"));
-	npc_spawntime_spin = newd wxSpinCtrl(this, PALETTE_SPAWN_NPC_TIME, i2ws(g_settings.getInteger(Config::DEFAULT_SPAWN_NPC_TIME)), wxDefaultPosition, wxSize(50, 20), wxSP_ARROW_KEYS, 0, 3600, g_settings.getInteger(Config::DEFAULT_SPAWN_NPC_TIME));
+	npc_spawntime_spin = newd wxSpinCtrl(this, PALETTE_SPAWN_NPC_TIME, i2ws(g_settings.getInteger(Config::DEFAULT_SPAWN_NPC_TIME)), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 3600, g_settings.getInteger(Config::DEFAULT_SPAWN_NPC_TIME));
 	grid->Add(npc_spawntime_spin, 0, wxEXPAND);
 	npc_brush_button = newd wxToggleButton(this, PALETTE_NPC_BRUSH_BUTTON, "Place Npc");
 	grid->Add(npc_brush_button, 0, wxEXPAND);
 
 	grid->Add(newd wxStaticText(this, wxID_ANY, "Spawn size"));
-	spawn_npc_size_spin = newd wxSpinCtrl(this, PALETTE_SPAWN_NPC_SIZE, i2ws(1), wxDefaultPosition, wxSize(50, 20), wxSP_ARROW_KEYS, 1, g_settings.getInteger(Config::MAX_SPAWN_NPC_RADIUS), g_settings.getInteger(Config::CURRENT_SPAWN_NPC_RADIUS));
+	spawn_npc_size_spin = newd wxSpinCtrl(this, PALETTE_SPAWN_NPC_SIZE, i2ws(1), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1, g_settings.getInteger(Config::MAX_SPAWN_NPC_RADIUS), g_settings.getInteger(Config::CURRENT_SPAWN_NPC_RADIUS));
 	grid->Add(spawn_npc_size_spin, 0, wxEXPAND);
 	spawn_npc_brush_button = newd wxToggleButton(this, PALETTE_SPAWN_NPC_BRUSH_BUTTON, "Place Spawn");
 	grid->Add(spawn_npc_brush_button, 0, wxEXPAND);

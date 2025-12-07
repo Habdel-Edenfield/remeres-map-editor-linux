@@ -102,6 +102,7 @@ bool Application::OnInit() {
 	spdlog::info("Review COPYING in RME distribution for details");
 	spdlog::info("Visit our website for updates, support, and resources: https://docs.opentibiabr.com/");
 	spdlog::info("Application started sucessfull!\n");
+	spdlog::info("Version: {}", __RME_VERSION__);
 
 	mt_seed(time(nullptr));
 	srand(time(nullptr));
@@ -352,7 +353,9 @@ MainFrame::MainFrame(const wxString &title, const wxPoint &pos, const wxSize &si
 	}
 
 	wxStatusBar* statusbar = CreateStatusBar();
-	statusbar->SetFieldsCount(4);
+	statusbar->SetFieldsCount(5);  // Added slot 4 for FPS/TexBinds telemetry
+	int widths[] = { -1, -1, 150, 100, 150 };  // Wider slots: Position(150), Zoom(100), Telemetry(150)
+	statusbar->SetStatusWidths(5, widths);
 	SetStatusText(wxString("Welcome to ") << __W_RME_APPLICATION_NAME__ << " " << __W_RME_VERSION__);
 
 	// Le sizer

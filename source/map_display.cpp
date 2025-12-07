@@ -47,6 +47,9 @@
 #include "spawn_npc_brush.h"
 #include "npc_brush.h"
 
+// Forward declare from map_drawer.cpp for telemetry
+extern int GetTextureBindsLastFrame();
+
 BEGIN_EVENT_TABLE(MapCanvas, wxGLCanvas)
 EVT_KEY_DOWN(MapCanvas::OnKeyDown)
 EVT_KEY_DOWN(MapCanvas::OnKeyUp)
@@ -104,13 +107,25 @@ END_EVENT_TABLE()
 
 bool MapCanvas::processed[] = { 0 };
 
+// OpenGL attributes for hardware acceleration on Linux
+// Without explicit attributes, Linux/Mesa may fallback to software rendering
+static int gl_attrib_list[] = {
+	WX_GL_RGBA,
+	WX_GL_DOUBLEBUFFER,
+	WX_GL_DEPTH_SIZE, 16,
+	WX_GL_STENCIL_SIZE, 0,
+	WX_GL_SAMPLE_BUFFERS, 0, // No multisampling for performance
+	0 // Sentinel
+};
+
 MapCanvas::MapCanvas(MapWindow* parent, Editor &editor, int* attriblist) :
-	wxGLCanvas(parent, wxID_ANY, nullptr, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS),
+	wxGLCanvas(parent, wxID_ANY, gl_attrib_list, wxDefaultPosition, wxDefaultSize, wxWANTS_CHARS),
 	editor(editor),
 	floor(rme::MapGroundLayer),
 	zoom(1.0),
 	cursor_x(-1),
 	cursor_y(-1),
+	pending_zoom_delta(0.0),
 	dragging(false),
 	boundbox_selection(false),
 	screendragging(false),
@@ -137,7 +152,9 @@ MapCanvas::MapCanvas(MapWindow* parent, Editor &editor, int* attriblist) :
 	last_click_y(-1),
 
 	last_mmb_click_x(-1),
-	last_mmb_click_y(-1) {
+	last_mmb_click_y(-1),
+	is_rendering(false),
+	render_pending(false) {
 	popup_menu = newd MapPopupMenu(editor);
 	animation_timer = newd AnimationTimer(this);
 	drawer = new MapDrawer(this);
@@ -152,6 +169,13 @@ MapCanvas::~MapCanvas() {
 }
 
 void MapCanvas::Refresh() {
+	// Event compression: if we're already rendering, just mark that a refresh is pending
+	// This prevents input flooding when render is slow (the main cause of 8s input lag)
+	if (is_rendering) {
+		render_pending = true;
+		return;
+	}
+	
 	if (refresh_watch.Time() > g_settings.getInteger(Config::HARD_REFRESH_RATE)) {
 		refresh_watch.Start();
 		wxGLCanvas::Update();
@@ -188,7 +212,40 @@ void MapCanvas::GetViewBox(int* view_scroll_x, int* view_scroll_y, int* screensi
 }
 
 void MapCanvas::OnPaint(wxPaintEvent &event) {
+	// Mark that we're rendering (for event compression)
+	is_rendering = true;
+
 	SetCurrent(*g_gui.GetGLContext(this));
+
+	// === Input Coalescing: Apply accumulated zoom delta ===
+	if (pending_zoom_delta != 0.0) {
+		double oldzoom = zoom;
+		zoom += pending_zoom_delta;
+
+		// Clamp to valid range
+		if (zoom < 0.125) {
+			pending_zoom_delta = 0.125 - oldzoom;
+			zoom = 0.125;
+		} else if (zoom > 25.00) {
+			pending_zoom_delta = 25.00 - oldzoom;
+			zoom = 25.0;
+		}
+
+		UpdateZoomStatus();
+
+		// Adjust viewport scroll to zoom toward cursor position
+		int screensize_x, screensize_y;
+		MapWindow* window = GetMapWindow();
+		window->GetViewSize(&screensize_x, &screensize_y);
+
+		int scroll_x = int(screensize_x * pending_zoom_delta * (std::max(cursor_x, 1) / double(screensize_x))) * GetContentScaleFactor();
+		int scroll_y = int(screensize_y * pending_zoom_delta * (std::max(cursor_y, 1) / double(screensize_y))) * GetContentScaleFactor();
+
+		window->ScrollRelative(-scroll_x, -scroll_y);
+
+		// Reset accumulator for next frame
+		pending_zoom_delta = 0.0;
+	}
 
 	if (g_gui.IsRenderingEnabled()) {
 		DrawingOptions &options = drawer->getOptions();
@@ -252,6 +309,40 @@ void MapCanvas::OnPaint(wxPaintEvent &event) {
 
 	// Send newd node requests
 	editor.SendNodeRequests();
+
+#ifdef __LINUX__
+	// === FPS Counter (StatusBar-based for stability) ===
+	static int frame_count = 0;
+	static auto last_fps_time = std::chrono::high_resolution_clock::now();
+	static int current_fps = 0;
+	
+	frame_count++;
+	auto now = std::chrono::high_resolution_clock::now();
+	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_fps_time).count();
+	
+	if (elapsed >= 1000) {
+		current_fps = frame_count;
+		frame_count = 0;
+		last_fps_time = now;
+		
+		// Update StatusBar slot 4 with FPS and texture binds (stable, doesn't touch title)
+		if (g_gui.root) {
+			int texBinds = GetTextureBindsLastFrame();
+			wxString telemetry = wxString::Format("FPS:%d Binds:%d", current_fps, texBinds);
+			g_gui.root->SetStatusText(telemetry, 4);
+		}
+	}
+#endif
+
+	// Mark rendering complete
+	is_rendering = false;
+	
+	// If a refresh was requested during rendering, schedule it now
+	if (render_pending) {
+		render_pending = false;
+		// Use CallAfter to avoid recursive paint during paint
+		CallAfter([this]() { wxGLCanvas::Refresh(); });
+	}
 }
 
 void MapCanvas::ShowPositionIndicator(const Position &position) {
@@ -450,6 +541,24 @@ void MapCanvas::UpdateZoomStatus() {
 	g_gui.root->SetStatusText(ss, 3);
 }
 
+// Bresenham's line algorithm to get all tiles between two points
+// Used for smooth brush strokes when mouse moves fast
+void MapCanvas::getLineTiles(int x0, int y0, int x1, int y1, int z, PositionVector* tiles) {
+	int dx = std::abs(x1 - x0);
+	int dy = std::abs(y1 - y0);
+	int sx = (x0 < x1) ? 1 : -1;
+	int sy = (y0 < y1) ? 1 : -1;
+	int err = dx - dy;
+
+	while (true) {
+		tiles->push_back(Position(x0, y0, z));
+		if (x0 == x1 && y0 == y1) break;
+		int e2 = 2 * err;
+		if (e2 > -dy) { err -= dy; x0 += sx; }
+		if (e2 < dx) { err += dx; y0 += sy; }
+	}
+}
+
 void MapCanvas::OnMouseMove(wxMouseEvent &event) {
 	if (screendragging) {
 		GetMapWindow()->ScrollRelative(int(g_settings.getFloat(Config::SCROLL_SPEED) * zoom * (event.GetX() - cursor_x)), int(g_settings.getFloat(Config::SCROLL_SPEED) * zoom * (event.GetY() - cursor_y)));
@@ -488,6 +597,9 @@ void MapCanvas::OnMouseMove(wxMouseEvent &event) {
 			g_gui.SetStatusText(ss);
 
 			Refresh();
+#ifdef __LINUX__
+			wxGLCanvas::Update();
+#endif
 		} else if (boundbox_selection) {
 			if (map_update) {
 				wxString ss;
@@ -499,6 +611,10 @@ void MapCanvas::OnMouseMove(wxMouseEvent &event) {
 			}
 
 			Refresh();
+#ifdef __LINUX__
+			// Force immediate repaint for smooth rubber-banding on Linux/GTK
+			wxGLCanvas::Update();
+#endif
 		}
 	} else { // Drawing mode
 		Brush* brush = g_gui.GetCurrentBrush();
@@ -551,17 +667,31 @@ void MapCanvas::OnMouseMove(wxMouseEvent &event) {
 				} else {
 					editor.draw(tilestodraw, event.AltDown());
 				}
-			} else { // No borders
+			} else { // No borders - use interpolation for smooth strokes
 				PositionVector tilestodraw;
 
-				for (int y = -g_gui.GetBrushSize(); y <= g_gui.GetBrushSize(); y++) {
-					for (int x = -g_gui.GetBrushSize(); x <= g_gui.GetBrushSize(); x++) {
-						if (g_gui.GetBrushShape() == BRUSHSHAPE_SQUARE) {
-							tilestodraw.push_back(Position(mouse_map_x + x, mouse_map_y + y, floor));
-						} else if (g_gui.GetBrushShape() == BRUSHSHAPE_CIRCLE) {
-							double distance = sqrt(double(x * x) + double(y * y));
-							if (distance < g_gui.GetBrushSize() + 0.005) {
-								tilestodraw.push_back(Position(mouse_map_x + x, mouse_map_y + y, floor));
+				// Get all tiles between last position and current position (Bresenham)
+				PositionVector lineTiles;
+				int prev_x = last_cursor_map_x;
+				int prev_y = last_cursor_map_y;
+				// Only interpolate if we have a valid previous position and drawing is ongoing
+				if (prev_x >= 0 && prev_y >= 0 && (prev_x != mouse_map_x || prev_y != mouse_map_y)) {
+					getLineTiles(prev_x, prev_y, mouse_map_x, mouse_map_y, floor, &lineTiles);
+				} else {
+					lineTiles.push_back(Position(mouse_map_x, mouse_map_y, floor));
+				}
+
+				// For each tile on the line, apply brush size/shape
+				for (const Position& linePos : lineTiles) {
+					for (int y = -g_gui.GetBrushSize(); y <= g_gui.GetBrushSize(); y++) {
+						for (int x = -g_gui.GetBrushSize(); x <= g_gui.GetBrushSize(); x++) {
+							if (g_gui.GetBrushShape() == BRUSHSHAPE_SQUARE) {
+								tilestodraw.push_back(Position(linePos.x + x, linePos.y + y, floor));
+							} else if (g_gui.GetBrushShape() == BRUSHSHAPE_CIRCLE) {
+								double distance = sqrt(double(x * x) + double(y * y));
+								if (distance < g_gui.GetBrushSize() + 0.005) {
+									tilestodraw.push_back(Position(linePos.x + x, linePos.y + y, floor));
+								}
 							}
 						}
 					}
@@ -712,6 +842,10 @@ void MapCanvas::OnMouseActionClick(wxMouseEvent &event) {
 				boundbox_selection = false;
 				if (event.ShiftDown()) {
 					boundbox_selection = true;
+#ifdef __LINUX__
+					// Capture mouse to continue receiving events if cursor leaves window
+					if (!HasCapture()) CaptureMouse();
+#endif
 
 					if (!event.ControlDown()) {
 						selection.start(Selection::NONE, ACTION_UNSELECT); // Start selection session
@@ -1210,6 +1344,9 @@ void MapCanvas::OnMouseActionRelease(wxMouseEvent &event) {
 		editor.updateActions();
 		dragging = false;
 		boundbox_selection = false;
+#ifdef __LINUX__
+		if (HasCapture()) ReleaseMouse();
+#endif
 	} else if (g_gui.GetCurrentBrush()) { // Drawing mode
 		Brush* brush = g_gui.GetCurrentBrush();
 		if (dragging_draw) {
@@ -1592,11 +1729,94 @@ void MapCanvas::OnMousePropertiesRelease(wxMouseEvent &event) {
 	}
 
 	popup_menu->Update();
+
+#ifdef __LINUX__
+	// === GTK Click-Through Fix ===
+	// GTK's popup menu is modal and consumes the dismiss click.
+	// We use position-delta detection to simulate Windows-like pass-through.
+	
+	// Step 1: Snapshot mouse position BEFORE opening menu
+	wxPoint startScreenPos = wxGetMousePosition();
+	int start_map_x = mouse_map_x;
+	int start_map_y = mouse_map_y;
+#endif
+
 	PopupMenu(popup_menu);
+
+#ifdef __LINUX__
+	// Step 2: Menu has closed. Check if user clicked elsewhere.
+	
+	// Check if ESC was pressed (user wants to cancel, not click-through)
+	bool escPressed = wxGetKeyState(WXK_ESCAPE);
+	
+	if (!escPressed) {
+		// Get current mouse position
+		wxPoint endScreenPos = wxGetMousePosition();
+		
+		// Convert to map coordinates
+		wxPoint clientPos = ScreenToClient(endScreenPos);
+		int end_map_x, end_map_y;
+		ScreenToMap(clientPos.x, clientPos.y, &end_map_x, &end_map_y);
+		
+		// Step 3: Check if mouse moved to a different tile
+		if (end_map_x != start_map_x || end_map_y != start_map_y) {
+			// User dismissed menu by clicking elsewhere!
+			// Update selection to new tile immediately
+			mouse_map_x = end_map_x;
+			mouse_map_y = end_map_y;
+			
+			Tile* tile = editor.getMap().getTile(mouse_map_x, mouse_map_y, floor);
+			if (tile) {
+				Selection& selection = editor.getSelection();
+				selection.start();
+				selection.clear();
+				selection.commit();
+				if (tile->spawnMonster && g_settings.getInteger(Config::SHOW_SPAWNS_MONSTER)) {
+					selection.add(tile, tile->spawnMonster);
+				} else if (const auto monster = tile->getTopMonster(); monster && g_settings.getInteger(Config::SHOW_MONSTERS)) {
+					selection.add(tile, monster);
+				} else if (tile->npc && g_settings.getInteger(Config::SHOW_NPCS)) {
+					selection.add(tile, tile->npc);
+				} else if (tile->spawnNpc && g_settings.getInteger(Config::SHOW_SPAWNS_NPC)) {
+					selection.add(tile, tile->spawnNpc);
+				} else if (Item* item = tile->getTopItem()) {
+					selection.add(tile, item);
+				}
+				selection.finish();
+				selection.updateSelectionCount();
+			}
+			
+			g_gui.RefreshView();
+			Update();
+			
+			// Step 4: Check if right button is still pressed (user wants new menu)
+			wxMouseState mouseState = wxGetMouseState();
+			if (mouseState.RightIsDown()) {
+				// Use CallAfter to defer menu re-open, allowing GTK to clean up
+				int captured_x = mouse_map_x;
+				int captured_y = mouse_map_y;
+				int captured_z = floor;
+				CallAfter([this, captured_x, captured_y, captured_z]() {
+					// Re-open menu at new position
+					popup_menu->Update();
+					PopupMenu(popup_menu);
+					
+					last_cursor_map_x = captured_x;
+					last_cursor_map_y = captured_y;
+					last_cursor_map_z = captured_z;
+					g_gui.RefreshView();
+				});
+			}
+		}
+	}
+#endif
 
 	editor.resetActionsTimer();
 	dragging = false;
 	boundbox_selection = false;
+#ifdef __LINUX__
+	if (HasCapture()) ReleaseMouse();
+#endif
 
 	last_cursor_map_x = mouse_map_x;
 	last_cursor_map_y = mouse_map_y;
@@ -1630,33 +1850,16 @@ void MapCanvas::OnWheel(wxMouseEvent &event) {
 			diff = 0.0;
 		}
 	} else {
+		// Input coalescing: accumulate zoom delta instead of applying immediately
+		// This prevents event flooding on Linux (100+ events per scroll gesture)
 		double diff = -event.GetWheelRotation() * g_settings.getFloat(Config::ZOOM_SPEED) / 640.0;
-		double oldzoom = zoom;
-		zoom += diff;
+		pending_zoom_delta += diff;
 
-		if (zoom < 0.125) {
-			diff = 0.125 - oldzoom;
-			zoom = 0.125;
+		// Request single refresh instead of N refreshes per scroll
+		if (!is_rendering) {
+			Refresh();
 		}
-		if (zoom > 25.00) {
-			diff = 25.00 - oldzoom;
-			zoom = 25.0;
-		}
-
-		UpdateZoomStatus();
-
-		int screensize_x, screensize_y;
-		MapWindow* window = GetMapWindow();
-		window->GetViewSize(&screensize_x, &screensize_y);
-
-		// This took a day to figure out!
-		int scroll_x = int(screensize_x * diff * (std::max(cursor_x, 1) / double(screensize_x))) * GetContentScaleFactor();
-		int scroll_y = int(screensize_y * diff * (std::max(cursor_y, 1) / double(screensize_y))) * GetContentScaleFactor();
-
-		window->ScrollRelative(-scroll_x, -scroll_y);
 	}
-
-	Refresh();
 }
 
 void MapCanvas::OnLoseMouse(wxMouseEvent &event) {

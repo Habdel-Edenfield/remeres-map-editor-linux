@@ -130,6 +130,8 @@ public:
 protected:
 	void getTilesToDraw(int mouse_map_x, int mouse_map_y, int floor, PositionVector* tilestodraw, PositionVector* tilestoborder, bool fill = false);
 	bool floodFill(Map* map, const Position &center, int x, int y, GroundBrush* brush, PositionVector* positions);
+	// Bresenham line algorithm for smooth brush strokes
+	void getLineTiles(int x0, int y0, int x1, int y1, int z, PositionVector* tiles);
 
 private:
 	enum {
@@ -152,6 +154,9 @@ private:
 	double zoom;
 	int cursor_x;
 	int cursor_y;
+
+	// Event coalescing state (prevents input flooding on Linux)
+	double pending_zoom_delta;  // Accumulated zoom from wheel events (not yet applied)
 
 	bool dragging;
 	bool boundbox_selection;
@@ -186,6 +191,10 @@ private:
 	int view_scroll_y;
 
 	uint32_t current_house_id;
+
+	// Event compression flags to prevent input flooding
+	bool is_rendering;
+	bool render_pending;
 
 	wxStopWatch refresh_watch;
 	MapPopupMenu* popup_menu;

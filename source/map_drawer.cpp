@@ -17,6 +17,8 @@
 
 #include "main.h"
 
+#include <unordered_set>
+
 #if defined(__LINUX__) || defined(__WINDOWS__)
 	#include <GL/glut.h>
 #endif
@@ -45,6 +47,24 @@
 #include "waypoint_brush.h"
 #include "zone_brush.h"
 #include "light_drawer.h"
+
+// === Texture State Caching (Redundant State Filter) ===
+// Eliminates redundant glBindTexture calls when tiles use the same texture
+static GLuint g_currentTextureId = 0;
+static int g_textureBindsThisFrame = 0;
+static int g_textureBindsLastFrame = 0;
+
+// Call at start of each frame to reset cache
+static void ResetTextureCache() {
+	g_currentTextureId = 0;
+	g_textureBindsLastFrame = g_textureBindsThisFrame;
+	g_textureBindsThisFrame = 0;
+}
+
+// Get binds from last complete frame (for telemetry)
+int GetTextureBindsLastFrame() {
+	return g_textureBindsLastFrame;
+}
 
 DrawingOptions::DrawingOptions() {
 	SetDefault();
@@ -179,6 +199,41 @@ void MapDrawer::SetupVars() {
 }
 
 void MapDrawer::SetupGL() {
+	// === CRITICAL DIAGNOSTIC: Print GL renderer info on first call ===
+	static bool gl_info_printed = false;
+	if (!gl_info_printed) {
+		gl_info_printed = true;
+		
+		const char* vendor = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+		const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+		const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+		
+		spdlog::critical("=== OPENGL RENDERER DIAGNOSTIC ===");
+		spdlog::critical("GL_VENDOR:   {}", vendor ? vendor : "NULL");
+		spdlog::critical("GL_RENDERER: {}", renderer ? renderer : "NULL");
+		spdlog::critical("GL_VERSION:  {}", version ? version : "NULL");
+		spdlog::critical("=================================");
+		
+		// Also print to stderr for visibility
+		fprintf(stderr, "\n=== OPENGL RENDERER DIAGNOSTIC ===\n");
+		fprintf(stderr, "GL_VENDOR:   %s\n", vendor ? vendor : "NULL");
+		fprintf(stderr, "GL_RENDERER: %s\n", renderer ? renderer : "NULL");
+		fprintf(stderr, "GL_VERSION:  %s\n", version ? version : "NULL");
+		fprintf(stderr, "=================================\n\n");
+		
+		// CRITICAL CHECK: If using software renderer, warn loudly
+		if (renderer) {
+			std::string rendererStr(renderer);
+			if (rendererStr.find("llvmpipe") != std::string::npos ||
+			    rendererStr.find("softpipe") != std::string::npos ||
+			    rendererStr.find("VMware") != std::string::npos ||
+			    rendererStr.find("Mesa") != std::string::npos && rendererStr.find("Intel") == std::string::npos && rendererStr.find("AMD") == std::string::npos && rendererStr.find("Radeon") == std::string::npos) {
+				spdlog::error("!!! WARNING: SOFTWARE RENDERING DETECTED - PERFORMANCE WILL BE TERRIBLE !!!");
+				fprintf(stderr, "!!! WARNING: SOFTWARE RENDERING DETECTED - PERFORMANCE WILL BE TERRIBLE !!!\n");
+			}
+		}
+	}
+	
 	glViewport(0, 0, screensize_x, screensize_y);
 
 	// Enable 2D mode
@@ -215,6 +270,9 @@ void MapDrawer::Release() {
 }
 
 void MapDrawer::Draw() {
+	// Reset texture cache at start of each frame
+	ResetTextureCache();
+	
 	DrawBackground();
 	DrawMap();
 	if (options.show_lights) {
@@ -309,6 +367,12 @@ void MapDrawer::DrawMap() {
 	bool only_colors = options.isOnlyColors();
 	bool tile_indicators = options.isTileIndicators();
 
+	// === Z-Axis Occlusion Culling ===
+	// Track tiles that have been covered by opaque ground on higher floors
+	// Key: (X << 32) | Y, Value: presence in set = occluded
+	std::unordered_set<uint64_t> occluded_tiles;
+	occluded_tiles.reserve(8192);  // Pre-allocate for typical viewport
+
 	for (int map_z = start_z; map_z >= superend_z; map_z--) {
 		if (options.show_shade) {
 			DrawShade(map_z);
@@ -339,6 +403,31 @@ void MapDrawer::DrawMap() {
 						for (int map_x = 0; map_x < 4; ++map_x) {
 							for (int map_y = 0; map_y < 4; ++map_y) {
 								TileLocation* location = nd->getTile(map_x, map_y, map_z);
+
+								// === Z-Axis Occlusion Culling ===
+								if (location && location->get()) {
+									Tile* tile = location->get();
+									const Position& pos = location->getPosition();
+									uint64_t tile_key = (uint64_t(pos.x) << 32) | uint64_t(pos.y);
+
+									// Check if this tile is occluded by an opaque ground above
+									bool is_occluded = occluded_tiles.find(tile_key) != occluded_tiles.end();
+
+									// Skip rendering if:
+									// 1. Tile is occluded by floor above
+									// 2. Not the current visible floor (always show current floor)
+									// 3. transparent_floors is disabled (user doesn't want to see through)
+									if (is_occluded && map_z < end_z && !options.transparent_floors) {
+										continue;  // Skip this tile - it's hidden by opaque ground above
+									}
+
+									// Mark this tile as occluding if it has opaque ground
+									// Safety: hasGround() filters out empty tiles (which are also isBlocking())
+									if (tile->hasGround() && tile->isBlocking()) {
+										occluded_tiles.insert(tile_key);
+									}
+								}
+
 								DrawTile(location);
 								// draw light, but only if not zoomed too far
 								if (location && options.show_lights && zoom <= 10) {
@@ -2040,7 +2129,13 @@ void MapDrawer::glBlitTexture(int sx, int sy, int textureId, int red, int green,
 		spdlog::debug("Blitting outfit {} at ({}, {})", outfit.name, sx, sy);
 	}
 
-	glBindTexture(GL_TEXTURE_2D, textureId);
+	// Texture State Caching: Only bind if different from current
+	if (g_currentTextureId != textureId) {
+		glBindTexture(GL_TEXTURE_2D, textureId);
+		g_currentTextureId = textureId;
+		g_textureBindsThisFrame++;
+	}
+	
 	glColor4ub(uint8_t(red), uint8_t(green), uint8_t(blue), uint8_t(alpha));
 	glBegin(GL_QUADS);
 	glTexCoord2f(0.f, 0.f);

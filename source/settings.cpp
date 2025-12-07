@@ -232,8 +232,8 @@ void Settings::IO(IOMode mode) {
 	Int(WORKER_THREADS, 1);
 	Int(MERGE_MOVE, 0);
 	Int(MERGE_PASTE, 0);
-	Int(UNDO_SIZE, 400);
-	Int(UNDO_MEM_SIZE, 40);
+	Int(UNDO_SIZE, 2000); // Increased for modern systems (was 400)
+	Int(UNDO_MEM_SIZE, 2048); // 2GB for modern systems (was 40MB)
 	Int(GROUP_ACTIONS, 1);
 	Int(SELECTION_TYPE, SELECT_CURRENT_FLOOR);
 	Int(COMPENSATED_SELECT, 1);
@@ -284,7 +284,7 @@ void Settings::IO(IOMode mode) {
 	Int(SOFTWARE_CLEAN_THRESHOLD, 1800);
 	Int(SOFTWARE_CLEAN_SIZE, 500);
 	Int(ICON_BACKGROUND, 0);
-	Int(HARD_REFRESH_RATE, 200);
+	Int(HARD_REFRESH_RATE, 16); // 60 FPS target (was 200ms)
 	Int(HIDE_ITEMS_WHEN_ZOOMED, 1);
 	String(SCREENSHOT_DIRECTORY, "");
 	String(SCREENSHOT_FORMAT, "png");
