@@ -64,3 +64,13 @@ cmake-build-debug/
 *.dat
 *.manifest
 canary-map-editor
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+*~
+*_test.xpm
+*_test2.xpm
+*.ico
+rmelinux*.png
