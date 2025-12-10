@@ -22,11 +22,48 @@
 
 wxDEFINE_EVENT(WELCOME_DIALOG_ACTION, wxCommandEvent);
 
+// Helper function to get theme colors based on icon background setting
+static WelcomeDialogTheme GetThemeColors() {
+	WelcomeDialogTheme theme;
+	int icon_bg = g_settings.getInteger(Config::ICON_BACKGROUND);
+
+	if (icon_bg == 0) {
+		// Dark theme (black background)
+		theme.base_colour = wxColour(45, 45, 48);
+		theme.text_colour = wxColour(220, 220, 220);
+		theme.secondary_text_colour = wxColour(160, 160, 160);
+		theme.button_colour = wxColour(60, 60, 65);
+		theme.button_hover_colour = wxColour(70, 70, 75);
+		theme.recent_panel_colour = wxColour(37, 37, 40);
+		theme.checkbox_text_colour = wxColour(220, 220, 220);
+	} else if (icon_bg == 88) {
+		// Gray theme
+		theme.base_colour = wxColour(180, 180, 180);
+		theme.text_colour = wxColour(40, 40, 40);
+		theme.secondary_text_colour = wxColour(80, 80, 80);
+		theme.button_colour = wxColour(160, 160, 165);
+		theme.button_hover_colour = wxColour(140, 140, 145);
+		theme.recent_panel_colour = wxColour(195, 195, 195);
+		theme.checkbox_text_colour = wxColour(40, 40, 40);
+	} else {
+		// Light theme (white background = 255 or default)
+		theme.base_colour = wxColour(250, 250, 250);
+		theme.text_colour = theme.base_colour.ChangeLightness(40);
+		theme.secondary_text_colour = theme.base_colour.ChangeLightness(110);
+		theme.button_colour = theme.base_colour.ChangeLightness(96);
+		theme.button_hover_colour = theme.base_colour.ChangeLightness(93);
+		theme.recent_panel_colour = theme.base_colour.ChangeLightness(98);
+		theme.checkbox_text_colour = wxColour(51, 51, 51);
+	}
+
+	return theme;
+}
+
 WelcomeDialog::WelcomeDialog(const wxString &title_text, const wxString &version_text, const wxSize &size, const wxBitmap &rme_logo, const std::vector<wxString> &recent_files) :
 	wxDialog(nullptr, wxID_ANY, "", wxDefaultPosition, size) {
 	Centre();
-	wxColour base_colour = wxColor(250, 250, 250);
-	m_welcome_dialog_panel = newd WelcomeDialogPanel(this, GetClientSize(), title_text, version_text, base_colour, wxBitmap(rme_logo.ConvertToImage().Scale(FROM_DIP(this, 48), FROM_DIP(this, 48))), recent_files);
+	WelcomeDialogTheme theme = GetThemeColors();
+	m_welcome_dialog_panel = newd WelcomeDialogPanel(this, GetClientSize(), title_text, version_text, theme, recent_files);
 }
 
 void WelcomeDialog::OnButtonClicked(const wxMouseEvent &event) {
@@ -71,57 +108,82 @@ void WelcomeDialog::OnRecentItemClicked(const wxMouseEvent &event) {
 	}
 }
 
-WelcomeDialogPanel::WelcomeDialogPanel(WelcomeDialog* dialog, const wxSize &size, const wxString &title_text, const wxString &version_text, const wxColour &base_colour, const wxBitmap &rme_logo, const std::vector<wxString> &recent_files) :
+WelcomeDialogPanel::WelcomeDialogPanel(WelcomeDialog* dialog, const wxSize &size, const wxString &title_text, const wxString &version_text, const WelcomeDialogTheme &theme, const std::vector<wxString> &recent_files) :
 	wxPanel(dialog),
-	m_rme_logo(rme_logo),
 	m_title_text(title_text),
 	m_version_text(version_text),
-	m_text_colour(base_colour.ChangeLightness(40)),
-	m_background_colour(base_colour) {
+	m_text_colour(theme.text_colour),
+	m_background_colour(theme.base_colour) {
 
-	auto* recent_maps_panel = newd RecentMapsPanel(this, dialog, base_colour, recent_files);
+	auto* recent_maps_panel = newd RecentMapsPanel(this, dialog, theme, recent_files);
 	recent_maps_panel->SetMaxSize(wxSize(size.x / 2, size.y));
-	recent_maps_panel->SetBackgroundColour(base_colour.ChangeLightness(98));
+	recent_maps_panel->SetBackgroundColour(theme.recent_panel_colour);
+
+	// Create title label
+	m_title_label = newd wxStaticText(this, wxID_ANY, title_text);
+	wxFont title_font = GetFont();
+	title_font.SetPointSize(18);
+	m_title_label->SetFont(title_font);
+	m_title_label->SetForegroundColour(theme.text_colour);
+
+	// Create version label
+	m_version_label = newd wxStaticText(this, wxID_ANY, version_text);
+	m_version_label->SetFont(GetFont());
+	m_version_label->SetForegroundColour(theme.secondary_text_colour);
 
 	wxSize button_size = FROM_DIP(this, wxSize(150, 35));
-	wxColour button_base_colour = base_colour.ChangeLightness(90);
 
-	int button_pos_center_x = size.x / 4 - button_size.x / 2;
-	int button_pos_center_y = size.y / 2;
-
-	wxPoint newMapButtonPoint(button_pos_center_x, button_pos_center_y);
-	auto* new_map_button = newd WelcomeDialogButton(this, wxDefaultPosition, button_size, button_base_colour, "New");
+	auto* new_map_button = newd WelcomeDialogButton(this, wxDefaultPosition, button_size, theme.button_colour, theme.button_hover_colour, theme.text_colour, "New");
 	new_map_button->SetAction(wxID_NEW);
 	new_map_button->Bind(wxEVT_LEFT_UP, &WelcomeDialog::OnButtonClicked, dialog);
 
-	auto* open_map_button = newd WelcomeDialogButton(this, wxDefaultPosition, button_size, button_base_colour, "Open");
+	auto* open_map_button = newd WelcomeDialogButton(this, wxDefaultPosition, button_size, theme.button_colour, theme.button_hover_colour, theme.text_colour, "Open");
 	open_map_button->SetAction(wxID_OPEN);
 	open_map_button->Bind(wxEVT_LEFT_UP, &WelcomeDialog::OnButtonClicked, dialog);
-	auto* preferences_button = newd WelcomeDialogButton(this, wxDefaultPosition, button_size, button_base_colour, "Preferences");
+	auto* preferences_button = newd WelcomeDialogButton(this, wxDefaultPosition, button_size, theme.button_colour, theme.button_hover_colour, theme.text_colour, "Preferences");
 	preferences_button->SetAction(wxID_PREFERENCES);
 	preferences_button->Bind(wxEVT_LEFT_UP, &WelcomeDialog::OnButtonClicked, dialog);
 
 	Bind(wxEVT_PAINT, &WelcomeDialogPanel::OnPaint, this);
 
-	wxSizer* rootSizer = newd wxBoxSizer(wxHORIZONTAL);
-	wxSizer* buttons_sizer = newd wxBoxSizer(wxVERTICAL);
-	buttons_sizer->AddSpacer(size.y / 2);
-	buttons_sizer->Add(new_map_button, 0, wxALIGN_CENTER | wxTOP, FROM_DIP(this, 10));
-	buttons_sizer->Add(open_map_button, 0, wxALIGN_CENTER | wxTOP, FROM_DIP(this, 10));
-	buttons_sizer->Add(preferences_button, 0, wxALIGN_CENTER | wxTOP, FROM_DIP(this, 10));
-
-	wxSizer* vertical_sizer = newd wxBoxSizer(wxVERTICAL);
-	wxSizer* horizontal_sizer = newd wxBoxSizer(wxHORIZONTAL);
-
+	// Create checkbox
 	m_show_welcome_dialog_checkbox = newd wxCheckBox(this, wxID_ANY, "Show this dialog on startup");
 	m_show_welcome_dialog_checkbox->SetValue(g_settings.getInteger(Config::WELCOME_DIALOG) == 1);
 	m_show_welcome_dialog_checkbox->Bind(wxEVT_CHECKBOX, &WelcomeDialog::OnCheckboxClicked, dialog);
-	m_show_welcome_dialog_checkbox->SetBackgroundColour(m_background_colour);
-	horizontal_sizer->Add(m_show_welcome_dialog_checkbox, 0, wxALIGN_BOTTOM | wxALL, FROM_DIP(this, 10));
-	vertical_sizer->Add(buttons_sizer, 1, wxEXPAND);
-	vertical_sizer->Add(horizontal_sizer, 1, wxEXPAND);
+	m_show_welcome_dialog_checkbox->SetBackgroundColour(theme.base_colour);
+	m_show_welcome_dialog_checkbox->SetForegroundColour(theme.checkbox_text_colour);
 
-	rootSizer->Add(vertical_sizer, 1, wxEXPAND);
+	// Create main horizontal layout (two columns)
+	wxSizer* rootSizer = newd wxBoxSizer(wxHORIZONTAL);
+
+	// Left column
+	wxSizer* left_column_sizer = newd wxBoxSizer(wxVERTICAL);
+
+	// Add title section with proper spacing
+	left_column_sizer->AddSpacer(FROM_DIP(this, 40));
+	left_column_sizer->Add(m_title_label, 0, wxALIGN_CENTER);
+	left_column_sizer->Add(m_version_label, 0, wxALIGN_CENTER | wxTOP, FROM_DIP(this, 10));
+
+	// Add flexible space before buttons
+	left_column_sizer->AddStretchSpacer(1);
+
+	// Add buttons
+	wxSizer* buttons_sizer = newd wxBoxSizer(wxVERTICAL);
+	buttons_sizer->Add(new_map_button, 0, wxALIGN_CENTER | wxTOP, FROM_DIP(this, 10));
+	buttons_sizer->Add(open_map_button, 0, wxALIGN_CENTER | wxTOP, FROM_DIP(this, 10));
+	buttons_sizer->Add(preferences_button, 0, wxALIGN_CENTER | wxTOP, FROM_DIP(this, 10));
+	left_column_sizer->Add(buttons_sizer, 0, wxALIGN_CENTER);
+
+	// Add flexible space before checkbox
+	left_column_sizer->AddStretchSpacer(1);
+
+	// Add checkbox at bottom
+	wxSizer* checkbox_sizer = newd wxBoxSizer(wxHORIZONTAL);
+	checkbox_sizer->Add(m_show_welcome_dialog_checkbox, 0, wxALIGN_BOTTOM | wxALL, FROM_DIP(this, 10));
+	left_column_sizer->Add(checkbox_sizer, 0, wxEXPAND);
+
+	// Add both columns to root
+	rootSizer->Add(left_column_sizer, 1, wxEXPAND);
 	rootSizer->Add(recent_maps_panel, 1, wxEXPAND);
 	SetSizer(rootSizer);
 }
@@ -136,30 +198,15 @@ void WelcomeDialogPanel::OnPaint(const wxPaintEvent &event) {
 	dc.SetBrush(wxBrush(m_background_colour));
 	dc.SetPen(wxPen(m_background_colour));
 	dc.DrawRectangle(wxRect(wxPoint(0, 0), GetClientSize()));
-
-	dc.DrawBitmap(m_rme_logo, wxPoint(GetSize().x / 4 - m_rme_logo.GetWidth() / 2, FROM_DIP(this, 40)), true);
-
-	wxFont font = GetFont();
-	font.SetPointSize(18);
-	dc.SetFont(font);
-	wxSize header_size = dc.GetTextExtent(m_title_text);
-	wxSize header_point(GetSize().x / 4, GetSize().y / 4);
-	dc.SetTextForeground(m_text_colour);
-	dc.DrawText(m_title_text, wxPoint(header_point.x - header_size.x / 2, header_point.y));
-
-	dc.SetFont(GetFont());
-	wxSize version_size = dc.GetTextExtent(m_version_text);
-	dc.SetTextForeground(m_text_colour.ChangeLightness(110));
-	dc.DrawText(m_version_text, wxPoint(header_point.x - version_size.x / 2, header_point.y + header_size.y + 10));
 }
 
-WelcomeDialogButton::WelcomeDialogButton(wxWindow* parent, const wxPoint &pos, const wxSize &size, const wxColour &base_colour, const wxString &text) :
+WelcomeDialogButton::WelcomeDialogButton(wxWindow* parent, const wxPoint &pos, const wxSize &size, const wxColour &button_colour, const wxColour &button_hover_colour, const wxColour &text_colour, const wxString &text) :
 	wxPanel(parent, wxID_ANY, pos, size),
 	m_action(wxID_CLOSE),
 	m_text(text),
-	m_text_colour(base_colour.ChangeLightness(40)),
-	m_background(base_colour.ChangeLightness(96)),
-	m_background_hover(base_colour.ChangeLightness(93)),
+	m_text_colour(text_colour),
+	m_background(button_colour),
+	m_background_hover(button_hover_colour),
 	m_is_hover(false) {
 	Bind(wxEVT_PAINT, &WelcomeDialogButton::OnPaint, this);
 	Bind(wxEVT_ENTER_WINDOW, &WelcomeDialogButton::OnMouseEnter, this);
@@ -190,23 +237,23 @@ void WelcomeDialogButton::OnMouseLeave(const wxMouseEvent &event) {
 	Refresh();
 }
 
-RecentMapsPanel::RecentMapsPanel(wxWindow* parent, WelcomeDialog* dialog, const wxColour &base_colour, const std::vector<wxString> &recent_files) :
+RecentMapsPanel::RecentMapsPanel(wxWindow* parent, WelcomeDialog* dialog, const WelcomeDialogTheme &theme, const std::vector<wxString> &recent_files) :
 	wxPanel(parent, wxID_ANY) {
 	wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
 	for (const wxString &file : recent_files) {
-		auto* recent_item = newd RecentItem(this, base_colour, file);
+		auto* recent_item = newd RecentItem(this, theme, file);
 		sizer->Add(recent_item, 0, wxEXPAND);
 		recent_item->Bind(wxEVT_LEFT_UP, &WelcomeDialog::OnRecentItemClicked, dialog);
 	}
 	SetSizerAndFit(sizer);
 }
 
-RecentItem::RecentItem(wxWindow* parent, const wxColour &base_colour, const wxString &item_name) :
+RecentItem::RecentItem(wxWindow* parent, const WelcomeDialogTheme &theme, const wxString &item_name) :
 	wxPanel(parent, wxID_ANY),
-	m_text_colour(base_colour.ChangeLightness(40)),
-	m_text_colour_hover(base_colour.ChangeLightness(20)),
+	m_text_colour(theme.text_colour),
+	m_text_colour_hover(theme.secondary_text_colour),
 	m_item_text(item_name) {
-	SetBackgroundColour(base_colour.ChangeLightness(95));
+	SetBackgroundColour(theme.button_colour);
 	m_title = newd wxStaticText(this, wxID_ANY, wxFileNameFromPath(m_item_text));
 	m_title->SetFont(GetFont().Bold());
 	m_title->SetForegroundColour(m_text_colour);

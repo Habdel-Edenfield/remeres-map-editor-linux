@@ -22,6 +22,17 @@
 
 wxDECLARE_EVENT(WELCOME_DIALOG_ACTION, wxCommandEvent);
 
+// Theme color structure for Welcome Dialog
+struct WelcomeDialogTheme {
+	wxColour base_colour;
+	wxColour text_colour;
+	wxColour secondary_text_colour;
+	wxColour button_colour;
+	wxColour button_hover_colour;
+	wxColour recent_panel_colour;
+	wxColour checkbox_text_colour;
+};
+
 class WelcomeDialogPanel;
 
 class WelcomeDialog : public wxDialog {
@@ -37,12 +48,13 @@ private:
 
 class WelcomeDialogPanel : public wxPanel {
 public:
-	WelcomeDialogPanel(WelcomeDialog* parent, const wxSize &size, const wxString &title_text, const wxString &version_text, const wxColour &base_colour, const wxBitmap &rme_logo, const std::vector<wxString> &recent_files);
+	WelcomeDialogPanel(WelcomeDialog* parent, const wxSize &size, const wxString &title_text, const wxString &version_text, const WelcomeDialogTheme &theme, const std::vector<wxString> &recent_files);
 	void OnPaint(const wxPaintEvent &event);
 	void updateInputs();
 
 private:
-	wxBitmap m_rme_logo;
+	wxStaticText* m_title_label;
+	wxStaticText* m_version_label;
 	wxString m_title_text;
 	wxString m_version_text;
 	wxColour m_text_colour;
@@ -52,7 +64,7 @@ private:
 
 class WelcomeDialogButton : public wxPanel {
 public:
-	WelcomeDialogButton(wxWindow* parent, const wxPoint &pos, const wxSize &size, const wxColour &base_colour, const wxString &text);
+	WelcomeDialogButton(wxWindow* parent, const wxPoint &pos, const wxSize &size, const wxColour &button_colour, const wxColour &button_hover_colour, const wxColour &text_colour, const wxString &text);
 	void OnPaint(const wxPaintEvent &event);
 	void OnMouseEnter(const wxMouseEvent &event);
 	void OnMouseLeave(const wxMouseEvent &event);
@@ -74,12 +86,12 @@ private:
 
 class RecentMapsPanel : public wxPanel {
 public:
-	RecentMapsPanel(wxWindow* parent, WelcomeDialog* dialog, const wxColour &base_colour, const std::vector<wxString> &recent_files);
+	RecentMapsPanel(wxWindow* parent, WelcomeDialog* dialog, const WelcomeDialogTheme &theme, const std::vector<wxString> &recent_files);
 };
 
 class RecentItem : public wxPanel {
 public:
-	RecentItem(wxWindow* parent, const wxColour &base_colour, const wxString &item_name);
+	RecentItem(wxWindow* parent, const WelcomeDialogTheme &theme, const wxString &item_name);
 	void OnMouseEnter(const wxMouseEvent &event);
 	void OnMouseLeave(const wxMouseEvent &event);
 	void PropagateItemClicked(wxMouseEvent &event);
