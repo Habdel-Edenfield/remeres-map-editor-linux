@@ -211,6 +211,7 @@ void Settings::IO(IOMode mode) {
 	Int(SHOW_MONSTERS, 1);
 	Int(SHOW_NPCS, 1);
 	Int(SHOW_SPAWNS_NPC, 1);
+	Int(SHOW_CONTAINERS_WITH_ITEMS, 0);
 	Int(SHOW_HOUSES, 1);
 	Int(SHOW_BLOCKING, 0);
 	Int(SHOW_TOOLTIPS, 1);

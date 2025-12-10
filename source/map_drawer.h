@@ -69,6 +69,7 @@ public:
 	bool show_spawns_monster;
 	bool show_npcs;
 	bool show_spawns_npc;
+	bool show_containers_with_items;
 	bool show_houses;
 	bool show_shade;
 	bool show_special_tiles;
@@ -174,6 +175,7 @@ protected:
 	void DrawLight() const;
 	void WriteTooltip(const Item* item, std::ostringstream &stream);
 	void WriteTooltip(const Waypoint* item, std::ostringstream &stream);
+	void WriteTooltip(Container* container, std::ostringstream &stream);
 	void MakeTooltip(int screenx, int screeny, const std::string &text, uint8_t r = 255, uint8_t g = 255, uint8_t b = 255);
 	void AddLight(TileLocation* location);
 

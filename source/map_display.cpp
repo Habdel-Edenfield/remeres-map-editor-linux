@@ -273,6 +273,7 @@ void MapCanvas::OnPaint(wxPaintEvent &event) {
 			options.show_spawns_monster = g_settings.getBoolean(Config::SHOW_SPAWNS_MONSTER);
 			options.show_npcs = g_settings.getBoolean(Config::SHOW_NPCS);
 			options.show_spawns_npc = g_settings.getBoolean(Config::SHOW_SPAWNS_NPC);
+			options.show_containers_with_items = g_settings.getBoolean(Config::SHOW_CONTAINERS_WITH_ITEMS);
 			options.show_houses = g_settings.getBoolean(Config::SHOW_HOUSES);
 			options.show_shade = g_settings.getBoolean(Config::SHOW_SHADE);
 			options.show_special_tiles = g_settings.getBoolean(Config::SHOW_SPECIAL_TILES);

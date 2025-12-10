@@ -671,6 +671,7 @@ void ActionQueue::clear() {
 		delete batch;
 	}
 	actions.clear();
+	memory_size = 0;
 	current = 0;
 }
 
