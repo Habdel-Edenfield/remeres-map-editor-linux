@@ -329,3 +329,49 @@ if(UNIX AND NOT APPLE)
 		endif()
 	endif()
 endif()
+
+# ============================================================================
+# LINUX DESKTOP INTEGRATION - INSTALLATION
+# ============================================================================
+if(UNIX AND NOT APPLE)
+	if(CONVERT)
+		# Install desktop file to user applications directory
+		# This makes the application appear in the application menu
+		install(FILES "${CMAKE_BINARY_DIR}/${PROJECT_NAME}.desktop"
+			DESTINATION "${CMAKE_INSTALL_PREFIX}/share/applications"
+			OPTIONAL
+		)
+
+		# Install icons to hicolor icon theme (freedesktop.org standard)
+		# This ensures proper icon display across different desktop environments
+		foreach(SIZE ${ICON_SIZES})
+			install(FILES "${ICON_DIR}/rme_icon_${SIZE}.png"
+				DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/${SIZE}x${SIZE}/apps"
+				RENAME "${PROJECT_NAME}.png"
+				OPTIONAL
+			)
+		endforeach()
+
+		# Post-install script to update icon cache
+		# This refreshes the desktop environment's icon cache
+		install(CODE "
+			execute_process(
+				COMMAND gtk-update-icon-cache -f -t ${CMAKE_INSTALL_PREFIX}/share/icons/hicolor
+				OUTPUT_QUIET
+				ERROR_QUIET
+			)
+			execute_process(
+				COMMAND update-desktop-database ${CMAKE_INSTALL_PREFIX}/share/applications
+				OUTPUT_QUIET
+				ERROR_QUIET
+			)
+			message(STATUS \"Desktop integration installed successfully\")
+			message(STATUS \"Icon cache and desktop database updated\")
+		")
+
+		message(STATUS "Desktop integration install rules configured:")
+		message(STATUS "  - Desktop file will be installed to: ${CMAKE_INSTALL_PREFIX}/share/applications")
+		message(STATUS "  - Icons will be installed to: ${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/*/apps")
+		message(STATUS "  - Run 'make install' or 'cmake --install .' to install")
+	endif()
+endif()
